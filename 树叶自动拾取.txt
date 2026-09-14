@@ -1,0 +1,1013 @@
+local Library = {}
+local TweenService = game:GetService("TweenService")
+local UserInputService = game:GetService("UserInputService")
+local Players = game:GetService("Players")
+local ReplicatedStorage = game:GetService("ReplicatedStorage")
+local LocalPlayer = Players.LocalPlayer
+
+local uiParent = gethui and gethui() or game:GetService("CoreGui")
+
+for i, v in next, uiParent:GetChildren() do
+    if v:IsA("ScreenGui") and (v.Name == "Neverlose" or v.Name == "NeverloseFloating") then
+        v:Destroy()
+    end
+end
+
+local Refs = {
+    LeafSim = nil,
+    LeafFolder = nil,
+    CollectMany = nil,
+    EmptyBackpack = nil,
+    Dumpsters = nil,
+    UserIntent = false,
+    AutoSell = false,
+    AutoFarm = false,
+    AccelEnabled = false,
+    AccelIntervalSpeed = 0.001,
+    AccelDuration = 1,
+    AccelRestTime = 0.09,
+    AccelCycleStart = 0,
+    PausedByBag = false,
+    ScanRadius = 20,
+    MaxBatch = 100,
+    CollectInterval = 0.5,
+    SellDelay = 0.2,
+    TpCooldown = 0.15,
+    UiBody = nil,
+    UiScreen = nil,
+    StatusLabel = nil,
+    OriginCFrame = nil,
+    IsTeleporting = false,
+}
+
+local function Notify(tt, tx)
+    pcall(function()
+        game:GetService("StarterGui"):SetCore("SendNotification", {Title = tt, Text = tx, Duration = 5})
+    end)
+end
+
+local function Dragify(frame, parent)
+    parent = parent or frame
+    local dragging = false
+    local dragStartPos, frameStartPos
+
+    frame.InputBegan:Connect(function(i)
+        if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
+            dragging = true
+            dragStartPos = i.Position
+            frameStartPos = parent.Position
+        end
+    end)
+
+    UserInputService.InputChanged:Connect(function(i)
+        if dragging and (i.UserInputType == Enum.UserInputType.MouseMovement or i.UserInputType == Enum.UserInputType.Touch) then
+            local delta = i.Position - dragStartPos
+            parent.Position = UDim2.new(frameStartPos.X.Scale, frameStartPos.X.Offset + delta.X, frameStartPos.Y.Scale, frameStartPos.Y.Offset + delta.Y)
+        end
+    end)
+
+    UserInputService.InputEnded:Connect(function(i)
+        if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
+            dragging = false
+        end
+    end)
+end
+
+local function buttoneffect(frame, entered)
+    pcall(function()
+        entered.MouseEnter:Connect(function()
+            if frame.TextColor3 ~= Color3.fromRGB(234, 239, 246) then
+                TweenService:Create(frame, TweenInfo.new(0.06, Enum.EasingStyle.Quart, Enum.EasingDirection.In), {TextColor3 = Color3.fromRGB(234, 239, 245)}):Play()
+            end
+        end)
+        entered.MouseLeave:Connect(function()
+            if frame.TextColor3 ~= Color3.fromRGB(157, 171, 182) and frame.TextColor3 ~= Color3.fromRGB(234, 239, 246) then
+                TweenService:Create(frame, TweenInfo.new(0.06, Enum.EasingStyle.Quart, Enum.EasingDirection.In), {TextColor3 = Color3.fromRGB(157, 171, 182)}):Play()
+            end
+        end)
+    end)
+end
+
+local function clickEffect(button, amount)
+    button.MouseButton1Click:Connect(function()
+        local new = button.TextSize - tonumber(amount)
+        local revert = new + tonumber(amount)
+        TweenService:Create(button, TweenInfo.new(0.15, Enum.EasingStyle.Elastic, Enum.EasingDirection.Out), {TextSize = new}):Play()
+        task.wait(0.1)
+        TweenService:Create(button, TweenInfo.new(0.1, Enum.EasingStyle.Elastic, Enum.EasingDirection.Out), {TextSize = revert}):Play()
+    end)
+end
+
+function Library:Window(options)
+    options.text = options.text or "NEVERLOSE"
+    local SG = Instance.new("ScreenGui")
+    local Body = Instance.new("Frame")
+    local bodyCorner = Instance.new("UICorner")
+    local UIScale = Instance.new("UIScale")
+
+    local SideBar = Instance.new("Frame")
+    local sidebarCorner = Instance.new("UICorner")
+    local sbLine = Instance.new("Frame")
+    local TopBar = Instance.new("Frame")
+    local tbLine = Instance.new("Frame")
+    local Title = Instance.new("TextLabel")
+    local allPages = Instance.new("Frame")
+    local tabContainer = Instance.new("Frame")
+
+    SG.Parent = uiParent
+    SG.Name = "Neverlose"
+    SG.DisplayOrder = 999
+
+    Body.Name = "Body"
+    Body.Parent = SG
+    Body.AnchorPoint = Vector2.new(0.5, 0.5)
+    Body.BackgroundColor3 = Color3.fromRGB(9, 8, 13)
+    Body.BorderSizePixel = 0
+    Body.Position = UDim2.new(0.5, 0, 0.5, 0)
+    Body.Size = UDim2.new(0, 658, 0, 516)
+
+    local viewportSize = workspace.CurrentCamera.ViewportSize
+    local scaleFactor = math.clamp(viewportSize.X / 1200, 0.5, 0.75)
+    UIScale.Scale = scaleFactor
+    UIScale.Parent = Body
+
+    bodyCorner.CornerRadius = UDim.new(0, 4)
+    bodyCorner.Parent = Body
+
+    SideBar.Name = "SideBar"
+    SideBar.Parent = Body
+    SideBar.BackgroundColor3 = Color3.fromRGB(26, 36, 48)
+    SideBar.BorderSizePixel = 0
+    SideBar.Size = UDim2.new(0, 187, 0, 516)
+    sidebarCorner.CornerRadius = UDim.new(0, 4)
+    sidebarCorner.Parent = SideBar
+
+    sbLine.Name = "sbLine"
+    sbLine.Parent = SideBar
+    sbLine.BackgroundColor3 = Color3.fromRGB(15, 23, 36)
+    sbLine.BorderSizePixel = 0
+    sbLine.Position = UDim2.new(0.99490571, 0, 0, 0)
+    sbLine.Size = UDim2.new(0, 3, 0, 516)
+
+    TopBar.Name = "TopBar"
+    TopBar.Parent = Body
+    TopBar.BackgroundColor3 = Color3.fromRGB(9, 8, 13)
+    TopBar.BackgroundTransparency = 1.000
+    TopBar.BorderColor3 = Color3.fromRGB(14, 21, 32)
+    TopBar.BorderSizePixel = 0
+    TopBar.Position = UDim2.new(0.25166446, 0, 0, 0)
+    TopBar.Size = UDim2.new(0, 562, 0, 49)
+    tbLine.Name = "tbLine"
+    tbLine.Parent = TopBar
+    tbLine.BackgroundColor3 = Color3.fromRGB(15, 23, 36)
+    tbLine.BorderSizePixel = 0
+    tbLine.Position = UDim2.new(0.0400355868, 0, 1, 0)
+    tbLine.Size = UDim2.new(0, 469, 0, 3)
+
+    Title.Name = "Title"
+    Title.Parent = SideBar
+    Title.BackgroundColor3 = Color3.fromRGB(234, 239, 245)
+    Title.BackgroundTransparency = 1.000
+    Title.BorderSizePixel = 0
+    Title.Position = UDim2.new(0.0614973232, 0, 0.0213178284, 0)
+    Title.Size = UDim2.new(0, 162, 0, 26)
+    Title.Font = Enum.Font.ArialBold
+    Title.Text = options.text
+    Title.TextColor3 = Color3.fromRGB(234, 239, 245)
+    Title.TextSize = 28.000
+    Title.TextWrapped = true
+
+    Dragify(TopBar, Body)
+
+    allPages.Name = "allPages"
+    allPages.Parent = Body
+    allPages.BackgroundColor3 = Color3.fromRGB(234, 239, 245)
+    allPages.BackgroundTransparency = 1.000
+    allPages.BorderSizePixel = 0
+    allPages.Position = UDim2.new(0.29508087, 0, 0.100775197, 0)
+    allPages.Size = UDim2.new(0, 463, 0, 464)
+
+    tabContainer.Name = "tabContainer"
+    tabContainer.Parent = SideBar
+    tabContainer.BackgroundColor3 = Color3.fromRGB(234, 239, 245)
+    tabContainer.BackgroundTransparency = 1.000
+    tabContainer.BorderSizePixel = 0
+    tabContainer.Position = UDim2.new(0, 0, 0.100775197, 0)
+    tabContainer.Size = UDim2.new(0, 187, 0, 464)
+
+    local tabsections = {}
+    function tabsections:TabSection(sopts)
+        sopts.text = sopts.text or "Tab Section"
+        local tabLayout = Instance.new("UIListLayout")
+        local tabSection = Instance.new("Frame")
+        local tabSectionLabel = Instance.new("TextLabel")
+        local tabSectionLayout = Instance.new("UIListLayout")
+        tabLayout.Name = "tabLayout"
+        tabLayout.Parent = tabContainer
+        tabSection.Name = "tabSection"
+        tabSection.Parent = tabContainer
+        tabSection.BackgroundColor3 = Color3.fromRGB(234, 239, 245)
+        tabSection.BackgroundTransparency = 1.000
+        tabSection.BorderSizePixel = 0
+        tabSection.Size = UDim2.new(0, 189, 0, 22)
+
+        tabSectionLabel.Name = "tabSectionLabel"
+        tabSectionLabel.Parent = tabSection
+        tabSectionLabel.BackgroundColor3 = Color3.fromRGB(234, 239, 245)
+        tabSectionLabel.BackgroundTransparency = 1.000
+        tabSectionLabel.BorderSizePixel = 0
+        tabSectionLabel.Size = UDim2.new(0, 190, 0, 22)
+        tabSectionLabel.Font = Enum.Font.Gotham
+        tabSectionLabel.Text = "     ".. sopts.text
+        tabSectionLabel.TextColor3 = Color3.fromRGB(79, 107, 126)
+        tabSectionLabel.TextSize = 17.000
+        tabSectionLabel.TextXAlignment = Enum.TextXAlignment.Left
+
+        tabSectionLayout.Name = "tabSectionLayout"
+        tabSectionLayout.Parent = tabSection
+        tabSectionLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+        tabSectionLayout.SortOrder = Enum.SortOrder.LayoutOrder
+        tabSectionLayout.Padding = UDim.new(0, 7)
+
+        local tabs = {}
+        function tabs:Tab(topts)
+            topts.text = topts.text or "New Tab"
+            topts.icon = topts.icon or "rbxassetid://7999345313"
+            local tabButton = Instance.new("TextButton")
+            local tabButtonCorner = Instance.new("UICorner")
+            local tabIcon = Instance.new("ImageLabel")
+            local newPage = Instance.new("ScrollingFrame")
+            local pageLayout = Instance.new("UIGridLayout")
+
+            tabButton.Name = "tabButton"
+            tabButton.Parent = tabSection
+            tabButton.BackgroundColor3 = Color3.fromRGB(13, 57, 84)
+            tabButton.BorderSizePixel = 0
+            tabButton.Position = UDim2.new(0.0714285746, 0, 0.402777791, 0)
+            tabButton.Size = UDim2.new(0, 165, 0, 30)
+            tabButton.AutoButtonColor = false
+            tabButton.Font = Enum.Font.GothamSemibold
+            tabButton.Text = "         " .. topts.text
+            tabButton.TextColor3 = Color3.fromRGB(234, 239, 245)
+            tabButton.TextSize = 14.000
+            tabButton.BackgroundTransparency = 1
+            tabButton.TextXAlignment = Enum.TextXAlignment.Left
+            tabButton.MouseButton1Click:Connect(function()
+                for _, v in ipairs(allPages:GetChildren()) do v.Visible = false end
+                newPage.Visible = true
+                for _, v in ipairs(SideBar:GetDescendants()) do
+                    if v:IsA("TextButton") then
+                        TweenService:Create(v, TweenInfo.new(0.06, Enum.EasingStyle.Quart, Enum.EasingDirection.In), {BackgroundTransparency = 1}):Play()
+                    end
+                end
+                TweenService:Create(tabButton, TweenInfo.new(0.06, Enum.EasingStyle.Quart, Enum.EasingDirection.In), {BackgroundTransparency = 0}):Play()
+            end)
+
+            tabButtonCorner.CornerRadius = UDim.new(0, 4)
+            tabButtonCorner.Parent = tabButton
+
+            tabIcon.Name = "tabIcon"
+            tabIcon.Parent = tabButton
+            tabIcon.BackgroundColor3 = Color3.fromRGB(234, 239, 245)
+            tabIcon.BackgroundTransparency = 1.000
+            tabIcon.BorderSizePixel = 0
+            tabIcon.Position = UDim2.new(0.0408859849, 0, 0.133333355, 0)
+            tabIcon.Size = UDim2.new(0, 21, 0, 21)
+            tabIcon.Image = topts.icon
+            tabIcon.ImageColor3 = Color3.fromRGB(43, 154, 198)
+
+            newPage.Name = "newPage"
+            newPage.Parent = allPages
+            newPage.Visible = false
+            newPage.BackgroundColor3 = Color3.fromRGB(234, 239, 245)
+            newPage.BackgroundTransparency = 1.000
+            newPage.BorderSizePixel = 0
+            newPage.ClipsDescendants = false
+            newPage.Position = UDim2.new(0.021598272, 0, 0.0237068962, 0)
+            newPage.Size = UDim2.new(0, 442, 0, 440)
+            newPage.ScrollBarThickness = 4
+            newPage.CanvasSize = UDim2.new(0,0,0,0)
+
+            pageLayout.Name = "pageLayout"
+            pageLayout.Parent = newPage
+            pageLayout.SortOrder = Enum.SortOrder.LayoutOrder
+            pageLayout.CellPadding = UDim2.new(0, 12, 0, 12)
+            pageLayout.CellSize = UDim2.new(0, 215, 0, -10)
+            pageLayout:GetPropertyChangedSignal("AbsoluteContentSize"):Connect(function()
+                newPage.CanvasSize = UDim2.new(0,0,0,pageLayout.AbsoluteContentSize.Y)
+            end)
+
+            tabSection.Size += UDim2.new(0, 0, 0, 50)
+
+            local sections = {}
+            function sections:Section(secopts)
+                secopts.text = secopts.text or "Section"
+                local sectionFrame = Instance.new("Frame")
+                local sectionLabel = Instance.new("TextLabel")
+                local sectionFrameCorner = Instance.new("UICorner")
+                local sectionLayout = Instance.new("UIListLayout")
+                local sLine = Instance.new("TextLabel")
+                local sectionSizeConstraint = Instance.new("UISizeConstraint")
+
+                sectionFrame.Name = "sectionFrame"
+                sectionFrame.Parent = newPage
+                sectionFrame.BackgroundColor3 = Color3.fromRGB(0, 15, 30)
+                sectionFrame.BorderSizePixel = 0
+                sectionFrame.Size = UDim2.new(0, 215, 0, 134)
+
+                sectionLabel.Name = "sectionLabel"
+                sectionLabel.Parent = sectionFrame
+                sectionLabel.BackgroundColor3 = Color3.fromRGB(234, 239, 245)
+                sectionLabel.BackgroundTransparency = 1.000
+                sectionLabel.BorderSizePixel = 0
+                sectionLabel.Position = UDim2.new(0.0121902823, 0, 0, 0)
+                sectionLabel.Size = UDim2.new(0, 213, 0, 25)
+                sectionLabel.Font = Enum.Font.GothamSemibold
+                sectionLabel.Text = "   " .. secopts.text
+                sectionLabel.TextColor3 = Color3.fromRGB(234, 239, 245)
+                sectionLabel.TextSize = 12.000
+                sectionLabel.TextXAlignment = Enum.TextXAlignment.Left
+
+                sectionFrameCorner.CornerRadius = UDim.new(0, 4)
+                sectionFrameCorner.Parent = sectionFrame
+
+                sectionLayout.Name = "sectionLayout"
+                sectionLayout.Parent = sectionFrame
+                sectionLayout.HorizontalAlignment = Enum.HorizontalAlignment.Center
+                sectionLayout.SortOrder = Enum.SortOrder.LayoutOrder
+                sectionLayout.Padding = UDim.new(0, 2)
+
+                sLine.Name = "sLine"
+                sLine.Parent = sectionFrame
+                sLine.BackgroundColor3 = Color3.fromRGB(13, 28, 44)
+                sLine.BorderSizePixel = 0
+                sLine.Position = UDim2.new(0.0255813953, 0, 0.41538462, 0)
+                sLine.Size = UDim2.new(0, 202, 0, 3)
+                sLine.Text = ""
+
+                sectionSizeConstraint.Name = "sectionSizeConstraint"
+                sectionSizeConstraint.Parent = sectionFrame
+                sectionSizeConstraint.MinSize = Vector2.new(215, 35)
+
+                local elements = {}
+
+                function elements:Button(eopts)
+                    if not eopts.text or not eopts.callback then return end
+                    local TextButton = Instance.new("TextButton")
+                    TextButton.Parent = sectionFrame
+                    TextButton.BackgroundColor3 = Color3.fromRGB(13, 57, 84)
+                    TextButton.BorderSizePixel = 0
+                    TextButton.Position = UDim2.new(0.0348837227, 0, 0.355555564, 0)
+                    TextButton.Size = UDim2.new(0, 200, 0, 22)
+                    TextButton.AutoButtonColor = false
+                    TextButton.Text = eopts.text
+                    TextButton.Font = Enum.Font.Gotham
+                    TextButton.TextColor3 = Color3.fromRGB(157, 171, 182)
+                    TextButton.TextSize = 14.000
+                    TextButton.BackgroundTransparency = 1
+                    buttoneffect(TextButton, TextButton)
+                    clickEffect(TextButton, 5)
+                    TextButton.MouseButton1Click:Connect(function() eopts.callback() end)
+                    sectionSizeConstraint.MinSize += Vector2.new(0, 25)
+                end
+
+                function elements:Toggle(eopts)
+                    if not eopts.text or not eopts.callback then return end
+                    local toggleLabel = Instance.new("TextLabel")
+                    local toggleFrame = Instance.new("TextButton")
+                    local togFrameCorner = Instance.new("UICorner")
+                    local toggleButton = Instance.new("TextButton")
+                    local togBtnCorner = Instance.new("UICorner")
+                    local State = eopts.state or false
+
+                    if eopts.state then
+                        toggleButton.Position = UDim2.new(0.74, 0, 0.5, 0)
+                        toggleLabel.TextColor3 = Color3.fromRGB(234, 239, 246)
+                        toggleButton.BackgroundColor3 = Color3.fromRGB(2, 162, 243)
+                        toggleFrame.BackgroundColor3 = Color3.fromRGB(2, 23, 49)
+                    end
+
+                    toggleLabel.Name = "toggleLabel"
+                    toggleLabel.Parent = sectionFrame
+                    toggleLabel.BackgroundColor3 = Color3.fromRGB(157, 171, 182)
+                    toggleLabel.BackgroundTransparency = 1.000
+                    toggleLabel.Position = UDim2.new(0.0348837227, 0, 0.965517223, 0)
+                    toggleLabel.Size = UDim2.new(0, 200, 0, 22)
+                    toggleLabel.Font = Enum.Font.Gotham
+                    toggleLabel.Text = " " .. eopts.text
+                    toggleLabel.TextColor3 = Color3.fromRGB(157, 171, 182)
+                    toggleLabel.TextSize = 14.000
+                    toggleLabel.TextXAlignment = Enum.TextXAlignment.Left
+                    buttoneffect(toggleLabel, toggleLabel)
+
+                    toggleFrame.Name = "toggleFrame"
+                    toggleFrame.Parent = toggleLabel
+                    toggleFrame.BackgroundColor3 = Color3.fromRGB(4, 4, 11)
+                    toggleFrame.BorderSizePixel = 0
+                    toggleFrame.AnchorPoint = Vector2.new(0.5, 0.5)
+                    toggleFrame.Position = UDim2.new(0.9, 0, 0.5, 0)
+                    toggleFrame.Size = UDim2.new(0, 38, 0, 18)
+                    toggleFrame.AutoButtonColor = false
+                    toggleFrame.Text = ""
+
+                    togFrameCorner.CornerRadius = UDim.new(0, 50)
+                    togFrameCorner.Parent = toggleFrame
+
+                    toggleButton.Name = "toggleButton"
+                    toggleButton.Parent = toggleFrame
+                    toggleButton.BackgroundColor3 = Color3.fromRGB(77, 77, 77)
+                    toggleButton.BorderSizePixel = 0
+                    toggleButton.AnchorPoint = Vector2.new(0.5, 0.5)
+                    toggleButton.Position = UDim2.new(0.25, 0, 0.5, 0)
+                    toggleButton.Size = UDim2.new(0, 16, 0, 16)
+                    toggleButton.AutoButtonColor = false
+                    toggleButton.Text = ""
+
+                    togBtnCorner.CornerRadius = UDim.new(0, 50)
+                    togBtnCorner.Parent = toggleButton
+
+                    local function PerformToggle()
+                        State = not State
+                        eopts.callback(State)
+                        TweenService:Create(toggleButton, TweenInfo.new(0.2, Enum.EasingStyle.Quart, Enum.EasingDirection.InOut), {
+                            Position = State and UDim2.new(0.74, 0, 0.5, 0) or UDim2.new(0.25, 0, 0.5, 0)
+                        }):Play()
+                        TweenService:Create(toggleLabel, TweenInfo.new(0.06, Enum.EasingStyle.Quart, Enum.EasingDirection.InOut), {
+                            TextColor3 = State and Color3.fromRGB(234, 239, 246) or Color3.fromRGB(157, 171, 182)
+                        }):Play()
+                        TweenService:Create(toggleButton, TweenInfo.new(0.06, Enum.EasingStyle.Quart, Enum.EasingDirection.InOut), {
+                            BackgroundColor3 = State and Color3.fromRGB(2, 162, 243) or Color3.fromRGB(77, 77, 77)
+                        }):Play()
+                        TweenService:Create(toggleFrame, TweenInfo.new(0.06, Enum.EasingStyle.Quart, Enum.EasingDirection.InOut), {
+                            BackgroundColor3 = State and Color3.fromRGB(2, 23, 49) or Color3.fromRGB(4, 4, 11)
+                        }):Play()
+                    end
+
+                    toggleFrame.MouseButton1Click:Connect(PerformToggle)
+                    toggleButton.MouseButton1Click:Connect(PerformToggle)
+
+                    sectionSizeConstraint.MinSize += Vector2.new(0, 25)
+                end
+
+                function elements:Slider(eopts)
+                    if not eopts.text or not eopts.min or not eopts.max or not eopts.callback then return end
+                    local Slider = Instance.new("Frame")
+                    local sliderLabel = Instance.new("TextLabel")
+                    local sliderFrame = Instance.new("TextButton")
+                    local sliderBall = Instance.new("TextButton")
+                    local sliderBallCorner = Instance.new("UICorner")
+                    local sliderTextBox = Instance.new("TextBox")
+                    local Held = false
+
+                    Slider.Name = "Slider"
+                    Slider.Parent = sectionFrame
+                    Slider.BackgroundColor3 = Color3.fromRGB(157, 171, 182)
+                    Slider.BackgroundTransparency = 1.000
+                    Slider.Position = UDim2.new(0.0395348854, 0, 0.947335422, 0)
+                    Slider.Size = UDim2.new(0, 200, 0, 22)
+
+                    sliderLabel.Name = "sliderLabel"
+                    sliderLabel.Parent = Slider
+                    sliderLabel.AnchorPoint = Vector2.new(0.5, 0.5)
+                    sliderLabel.BackgroundColor3 = Color3.fromRGB(157, 171, 182)
+                    sliderLabel.BackgroundTransparency = 1.000
+                    sliderLabel.Position = UDim2.new(0.2, 0, 0.5, 0)
+                    sliderLabel.Size = UDim2.new(0, 77, 0, 22)
+                    sliderLabel.Font = Enum.Font.Gotham
+                    sliderLabel.Text = " " .. eopts.text
+                    sliderLabel.TextColor3 = Color3.fromRGB(157, 171, 182)
+                    sliderLabel.TextSize = 14.000
+                    sliderLabel.TextXAlignment = Enum.TextXAlignment.Left
+                    buttoneffect(sliderLabel, Slider)
+
+                    sliderFrame.Name = "sliderFrame"
+                    sliderFrame.Parent = sliderLabel
+                    sliderFrame.BackgroundColor3 = Color3.fromRGB(29, 87, 118)
+                    sliderFrame.BorderSizePixel = 0
+                    sliderFrame.AnchorPoint = Vector2.new(0.5, 0.5)
+                    sliderFrame.Position = UDim2.new(1.6, 0, 0.5, 0)
+                    sliderFrame.Size = UDim2.new(0, 72, 0, 2)
+                    sliderFrame.Text = ""
+                    sliderFrame.AutoButtonColor = false
+
+                    sliderBall.Name = "sliderBall"
+                    sliderBall.Parent = sliderFrame
+                    sliderBall.AnchorPoint = Vector2.new(0.5, 0.5)
+                    sliderBall.BackgroundColor3 = Color3.fromRGB(67, 136, 231)
+                    sliderBall.BorderSizePixel = 0
+                    sliderBall.Position = UDim2.new(0, 0, 0.5, 0)
+                    sliderBall.Size = UDim2.new(0, 14, 0, 14)
+                    sliderBall.AutoButtonColor = false
+
+                    sliderBallCorner.CornerRadius = UDim.new(0, 50)
+                    sliderBallCorner.Parent = sliderBall
+
+                    sliderTextBox.Name = "sliderTextBox"
+                    sliderTextBox.Parent = sliderLabel
+                    sliderTextBox.BackgroundColor3 = Color3.fromRGB(1, 7, 17)
+                    sliderTextBox.AnchorPoint = Vector2.new(0.5, 0.5)
+                    sliderTextBox.Position = UDim2.new(2.4, 0, 0.5, 0)
+                    sliderTextBox.Size = UDim2.new(0, 31, 0, 15)
+                    sliderTextBox.Font = Enum.Font.Gotham
+                    sliderTextBox.Text = tostring(eopts.default or eopts.min)
+                    sliderTextBox.TextColor3 = Color3.fromRGB(234, 239, 245)
+                    sliderTextBox.TextSize = 11.000
+
+                    local function updateSlider(inputX)
+                        local frameSize = sliderFrame.AbsoluteSize.X
+                        local framePos = sliderFrame.AbsolutePosition.X
+                        if frameSize <= 0 then return end
+                        local pos = math.clamp((inputX - framePos) / frameSize, 0, 0.9)
+                        local minV = tonumber(eopts.min) or 0
+                        local maxV = tonumber(eopts.max) or 100
+                        local val = ((maxV - minV) / 0.9) * pos + minV
+                        val = math.clamp(val, minV, maxV)
+                        sliderTextBox.Text = tostring(val)
+                        sliderBall.Position = UDim2.new(pos, 0, 0.5, 0)
+                        eopts.callback(val)
+                    end
+
+                    if eopts.default then
+                        local minV = tonumber(eopts.min) or 0
+                        local maxV = tonumber(eopts.max) or 100
+                        local defV = tonumber(eopts.default)
+                        local ratio = (defV - minV) / (maxV - minV)
+                        sliderBall.Position = UDim2.new(ratio * 0.9, 0, 0.5, 0)
+                    end
+
+                    sliderFrame.MouseButton1Down:Connect(function()
+                        Held = true
+                        updateSlider(UserInputService:GetMouseLocation().X)
+                    end)
+                    sliderBall.MouseButton1Down:Connect(function()
+                        Held = true
+                        updateSlider(UserInputService:GetMouseLocation().X)
+                    end)
+
+                    UserInputService.InputChanged:Connect(function(i)
+                        if Held and (i.UserInputType == Enum.UserInputType.MouseMovement or i.UserInputType == Enum.UserInputType.Touch) then
+                            updateSlider(i.Position.X)
+                        end
+                    end)
+
+                    UserInputService.InputEnded:Connect(function(i)
+                        if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
+                            Held = false
+                        end
+                    end)
+
+                    sliderTextBox.FocusLost:Connect(function(enter)
+                        if enter then
+                            local v = tonumber(sliderTextBox.Text)
+                            if v then
+                                v = math.clamp(v, tonumber(eopts.min), tonumber(eopts.max))
+                                sliderTextBox.Text = tostring(v)
+                                eopts.callback(v)
+                            end
+                        end
+                    end)
+
+                    sectionSizeConstraint.MinSize += Vector2.new(0, 25)
+                end
+
+                function elements:Label(eopts)
+                    local label = Instance.new("TextLabel")
+                    label.Name = "statusLabel"
+                    label.Parent = sectionFrame
+                    label.BackgroundColor3 = Color3.fromRGB(157, 171, 182)
+                    label.BackgroundTransparency = 1.000
+                    label.Position = UDim2.new(0.0348837227, 0, 0.945454538, 0)
+                    label.Size = UDim2.new(0, 200, 0, 22)
+                    label.Font = Enum.Font.Gotham
+                    label.Text = eopts.text or "状态：准备就绪"
+                    label.TextColor3 = Color3.fromRGB(100, 255, 100)
+                    label.TextSize = 13.000
+                    label.TextXAlignment = Enum.TextXAlignment.Left
+                    label.TextWrapped = true
+                    sectionSizeConstraint.MinSize += Vector2.new(0, 25)
+                    return label
+                end
+
+                return elements
+            end
+            return sections
+        end
+        return tabs
+    end
+
+    local WindowObj = {}
+    WindowObj.Tabs = tabsections
+    WindowObj.Body = Body
+    WindowObj.ScreenGui = SG
+    return WindowObj
+end
+
+local MainWindow = Library:Window({text = "Neverlose"})
+Refs.UiBody = MainWindow.Body
+Refs.UiScreen = MainWindow.ScreenGui
+
+local Tab = MainWindow.Tabs:TabSection({text = ""}):Tab({text = "主功能", icon = "rbxassetid://7999345313"})
+local Section = Tab:Section({text = "拾取设置 (范围大易失效, 建议20-60)"})
+Refs.StatusLabel = Section:Label({text = "状态：加载中..."})
+
+local AccelSection = Tab:Section({text = "加速设置"})
+
+local function getRoot()
+    local char = LocalPlayer.Character
+    if not char then return nil end
+    return char:FindFirstChild("HumanoidRootPart")
+end
+
+local function teleportTo(pos)
+    local hrp = getRoot()
+    if not hrp then return false end
+    pcall(function()
+        hrp.CFrame = CFrame.new(pos + Vector3.new(0, 3, 0))
+    end)
+    return true
+end
+
+local function getDumpsterPos()
+    if not Refs.Dumpsters then return nil end
+    local hrp = getRoot()
+    if not hrp then return nil end
+    local origin = hrp.Position
+    local nearest, minDist = nil, math.huge
+    for _, obj in ipairs(Refs.Dumpsters:GetChildren()) do
+        if obj:IsA("Model") then
+            local pos
+            local leaves = obj:FindFirstChild("Leaves")
+            if leaves and leaves:IsA("BasePart") then
+                pos = leaves.Position
+            else
+                local ok, bb = pcall(function() return obj:GetBoundingBox() end)
+                if ok then pos = bb.Position end
+            end
+            if pos then
+                local d = (pos - origin).Magnitude
+                if d < minDist then
+                    minDist = d
+                    nearest = pos
+                end
+            end
+        end
+    end
+    return nearest
+end
+
+local function getNearestLeafPos()
+    if not Refs.LeafFolder or not Refs.LeafSim then return nil end
+    local hrp = getRoot()
+    if not hrp then return nil end
+    local origin = hrp.Position
+    local nearest, minDist = nil, math.huge
+    local canUseLeaf = Refs.LeafSim.canUseLeaf
+    for _, leaf in ipairs(Refs.LeafFolder:GetChildren()) do
+        if leaf:IsA("BasePart") then
+            local ok, usable = pcall(canUseLeaf, leaf)
+            if ok and usable then
+                local d = (leaf.Position - origin).Magnitude
+                if d < minDist then
+                    minDist = d
+                    nearest = leaf.Position
+                end
+            end
+        end
+    end
+    return nearest
+end
+
+local function GetCurrentInterval()
+    if not Refs.AccelEnabled then
+        return Refs.CollectInterval
+    end
+    local cycle = Refs.AccelDuration + Refs.AccelRestTime
+    if cycle <= 0 then return Refs.CollectInterval end
+    local pos = (tick() - Refs.AccelCycleStart) % cycle
+    if pos < Refs.AccelDuration then
+        return Refs.AccelIntervalSpeed
+    end
+    return Refs.CollectInterval
+end
+
+local function RefreshStatus()
+    local lbl = Refs.StatusLabel
+    if not lbl then return end
+    if not Refs.LeafSim then
+        lbl.Text = "状态：模块加载失败，请重新执行"
+        lbl.TextColor3 = Color3.fromRGB(255, 100, 100)
+        return
+    end
+    local leaves = LocalPlayer:GetAttribute("Leaves") or 0
+    local capacity = LocalPlayer:GetAttribute("LeafCapacity") or 25
+    if Refs.UserIntent then
+        if Refs.PausedByBag then
+            if Refs.AutoSell then
+                lbl.Text = "状态：自动出售中..."
+                lbl.TextColor3 = Color3.fromRGB(255, 200, 100)
+            else
+                lbl.Text = "状态：背包已满，请出售"
+                lbl.TextColor3 = Color3.fromRGB(255, 100, 100)
+            end
+        else
+            local accelTag = ""
+            if Refs.AccelEnabled then
+                local cycle = Refs.AccelDuration + Refs.AccelRestTime
+                if cycle > 0 then
+                    local pos = (tick() - Refs.AccelCycleStart) % cycle
+                    if pos < Refs.AccelDuration then
+                        accelTag = " [加速中]"
+                    end
+                end
+            end
+            lbl.Text = "状态：自动收集中 (" .. leaves .. "/" .. capacity .. ")" .. accelTag
+            lbl.TextColor3 = Color3.fromRGB(100, 255, 100)
+        end
+    else
+        lbl.Text = "状态：准备就绪 (" .. leaves .. "/" .. capacity .. ")"
+        lbl.TextColor3 = Color3.fromRGB(200, 200, 200)
+    end
+end
+
+local function OnLeavesChanged()
+    local leaves = LocalPlayer:GetAttribute("Leaves") or 0
+    local capacity = LocalPlayer:GetAttribute("LeafCapacity") or 25
+    if leaves >= capacity then
+        if Refs.UserIntent and not Refs.PausedByBag then
+            Refs.PausedByBag = true
+            if not Refs.AutoSell then
+                Notify("自动捡树叶", "背包已满，自动暂停。请出售。")
+            end
+        end
+    else
+        if Refs.PausedByBag then
+            Refs.PausedByBag = false
+        end
+    end
+    RefreshStatus()
+end
+LocalPlayer:GetAttributeChangedSignal("Leaves"):Connect(OnLeavesChanged)
+
+Section:Toggle({
+    text = "启用自动拾取",
+    state = false,
+    callback = function(state)
+        if not Refs.LeafSim then
+            Notify("自动捡树叶", "模块未加载")
+            return
+        end
+        Refs.UserIntent = state
+        if state then
+            local hrp = getRoot()
+            if hrp then Refs.OriginCFrame = hrp.CFrame end
+        else
+            Refs.PausedByBag = false
+        end
+        RefreshStatus()
+    end
+})
+
+Section:Toggle({
+    text = "自动出售 (自动TP往返垃圾桶)",
+    state = false,
+    callback = function(state) Refs.AutoSell = state end
+})
+
+Section:Toggle({
+    text = "自动寻叶 (附近无叶自动TP)",
+    state = false,
+    callback = function(state) Refs.AutoFarm = state end
+})
+
+Section:Slider({
+    text = "拾取范围",
+    min = 10, max = 200, default = 20,
+    callback = function(val) Refs.ScanRadius = val end
+})
+
+Section:Slider({
+    text = "批量拾取",
+    min = 1, max = 100, default = 100,
+    callback = function(val) Refs.MaxBatch = val end
+})
+
+Section:Slider({
+    text = "拾取间隔(秒)",
+    min = 0.02, max = 0.5, default = 0.5,
+    callback = function(val) Refs.CollectInterval = val end
+})
+
+Section:Button({
+    text = "一键出售 (需靠近垃圾桶)",
+    callback = function()
+        if not Refs.EmptyBackpack then
+            Notify("自动捡树叶", "未找到出售事件")
+            return
+        end
+        local leaves = LocalPlayer:GetAttribute("Leaves") or 0
+        if leaves <= 0 then
+            Notify("自动捡树叶", "背包已经是空的了")
+            return
+        end
+        pcall(function() Refs.EmptyBackpack:FireServer() end)
+    end
+})
+
+AccelSection:Toggle({
+    text = "启用加速",
+    state = false,
+    callback = function(state)
+        Refs.AccelEnabled = state
+        if state then
+            Refs.AccelCycleStart = tick()
+        end
+        RefreshStatus()
+    end
+})
+
+AccelSection:Slider({
+    text = "加速拾取间隔",
+    min = 0.001, max = 1, default = 0.001,
+    callback = function(val) Refs.AccelIntervalSpeed = val end
+})
+
+AccelSection:Slider({
+    text = "持续时间(秒)",
+    min = 0.1, max = 999999, default = 1,
+    callback = function(val) Refs.AccelDuration = val end
+})
+
+AccelSection:Slider({
+    text = "间隔时间(秒)",
+    min = 0.01, max = 999999, default = 0.09,
+    callback = function(val) Refs.AccelRestTime = val end
+})
+
+for _, v in ipairs(uiParent.Neverlose:GetDescendants()) do
+    if v:IsA("TextLabel") or v:IsA("TextButton") then
+        if v.Text == "Button" then v.Text = "" end
+    end
+end
+
+local FloatingGui = Instance.new("ScreenGui")
+FloatingGui.Name = "NeverloseFloating"
+FloatingGui.ResetOnSpawn = false
+FloatingGui.DisplayOrder = 1000
+FloatingGui.Parent = uiParent
+
+local FloatBtn = Instance.new("TextButton")
+FloatBtn.Name = "NLIcon"
+FloatBtn.Parent = FloatingGui
+FloatBtn.Size = UDim2.new(0, 50, 0, 50)
+FloatBtn.Position = UDim2.new(1, -70, 0.4, 0)
+FloatBtn.BackgroundColor3 = Color3.fromRGB(9, 8, 13)
+FloatBtn.Text = "NL"
+FloatBtn.TextColor3 = Color3.fromRGB(2, 162, 243)
+FloatBtn.Font = Enum.Font.GothamBold
+FloatBtn.TextSize = 20
+FloatBtn.Active = true
+FloatBtn.AutoButtonColor = false
+FloatBtn.BorderSizePixel = 0
+
+local FloatCorner = Instance.new("UICorner")
+FloatCorner.CornerRadius = UDim.new(0, 8)
+FloatCorner.Parent = FloatBtn
+
+Dragify(FloatBtn, FloatBtn)
+
+FloatBtn.MouseButton1Click:Connect(function()
+    local body = Refs.UiBody
+    if body then body.Visible = not body.Visible end
+end)
+
+UserInputService.InputBegan:Connect(function(i, gp)
+    if gp then return end
+    if i.KeyCode == Enum.KeyCode.LeftShift then
+        local body = Refs.UiBody
+        if body then body.Visible = not body.Visible end
+    end
+end)
+
+task.spawn(function()
+    local ps = LocalPlayer:FindFirstChild("PlayerScripts")
+    if ps then
+        local ok, res = pcall(function()
+            return require(ps:WaitForChild("LeafSim", 10))
+        end)
+        if ok and res then
+            Refs.LeafSim = res
+            Refs.LeafFolder = res.folder
+            Refs.CollectMany = res.collectMany
+        end
+    end
+    if not Refs.LeafSim then
+        local rs = ReplicatedStorage:FindFirstChild("LeafSim")
+        if rs then
+            local ok, res = pcall(require, rs)
+            if ok and res then
+                Refs.LeafSim = res
+                Refs.LeafFolder = res.folder
+                Refs.CollectMany = res.collectMany
+            end
+        end
+    end
+    local remotes = ReplicatedStorage:FindFirstChild("Remotes")
+    if remotes then
+        Refs.EmptyBackpack = remotes:FindFirstChild("EmptyBackpack")
+    end
+    local mapRegistry = ReplicatedStorage:FindFirstChild("MapRegistry")
+    if mapRegistry then
+        local ok, mr = pcall(require, mapRegistry)
+        if ok and mr and mr.get then
+            local ok2, dumpsters = pcall(function() return mr.get("Dumpsters") end)
+            if ok2 then Refs.Dumpsters = dumpsters end
+        end
+    end
+    if not Refs.Dumpsters then
+        Refs.Dumpsters = workspace:FindFirstChild("Dumpsters")
+    end
+    RefreshStatus()
+end)
+
+local sharedOverlapParams = OverlapParams.new()
+sharedOverlapParams.FilterType = Enum.RaycastFilterType.Include
+local overlapFilterSet = false
+
+task.spawn(function()
+    while true do
+        task.wait(GetCurrentInterval())
+
+        if not Refs.UserIntent then continue end
+        if not Refs.LeafSim then continue end
+
+        if Refs.PausedByBag and Refs.AutoSell and not Refs.IsTeleporting then
+            Refs.IsTeleporting = true
+            local dumpPos = getDumpsterPos()
+            local hrp = getRoot()
+            if dumpPos and hrp then
+                local savedCFrame = hrp.CFrame
+                teleportTo(dumpPos)
+                task.wait(Refs.SellDelay)
+                pcall(function() Refs.EmptyBackpack:FireServer() end)
+                task.wait(Refs.SellDelay)
+                pcall(function()
+                    local hrp2 = getRoot()
+                    if hrp2 then hrp2.CFrame = savedCFrame end
+                end)
+            end
+            task.wait(Refs.TpCooldown)
+            Refs.IsTeleporting = false
+            continue
+        end
+
+        if Refs.PausedByBag then continue end
+
+        local hrp = getRoot()
+        if not hrp then continue end
+
+        if not Refs.IsTeleporting then
+            Refs.OriginCFrame = hrp.CFrame
+        end
+
+        if not overlapFilterSet and Refs.LeafFolder then
+            sharedOverlapParams.FilterDescendantsInstances = { Refs.LeafFolder }
+            overlapFilterSet = true
+        end
+
+        local current = LocalPlayer:GetAttribute("Leaves") or 0
+        local capacity = LocalPlayer:GetAttribute("LeafCapacity") or 25
+        local space = capacity - current
+        if space <= 0 then continue end
+
+        local parts = workspace:GetPartBoundsInRadius(hrp.Position, Refs.ScanRadius, sharedOverlapParams)
+        local batch = {}
+        local maxCount = math.min(space, Refs.MaxBatch)
+        local canUseLeaf = Refs.LeafSim.canUseLeaf
+
+        for _, part in ipairs(parts) do
+            if #batch >= maxCount then break end
+            if part:IsA("BasePart") then
+                local ok, usable = pcall(canUseLeaf, part)
+                if ok and usable then
+                    table.insert(batch, part)
+                end
+            end
+        end
+
+        if #batch > 0 then
+            pcall(function() Refs.CollectMany(batch) end)
+        elseif Refs.AutoFarm then
+            local leafPos = getNearestLeafPos()
+            if leafPos then
+                Refs.IsTeleporting = true
+                teleportTo(leafPos)
+                task.wait(Refs.TpCooldown)
+                Refs.IsTeleporting = false
+            end
+        end
+    end
+end)
+
+OnLeavesChanged()
+RefreshStatus()
+ ------使用默认配置即可,加速间隔可改成0.05,按需修改,tp树叶有bug懒得修可用可不用
