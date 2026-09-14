@@ -22,6 +22,7 @@ local Refs = {
     UserIntent = false,
     AutoSell = false,
     AutoFarm = false,
+    AntiOutOfBounds = false,
     AccelEnabled = false,
     AccelIntervalSpeed = 0.001,
     AccelDuration = 1,
@@ -32,13 +33,21 @@ local Refs = {
     MaxBatch = 100,
     CollectInterval = 0.5,
     SellDelay = 0.2,
-    TpCooldown = 0.15,
+    SellTpCooldown = 0.15,
+    TpStayDuration = 4,
+    LastTpTime = 0,
+    LastSafeCFrame = nil,
+    MaxTpDistance = 200,
     UiBody = nil,
     UiScreen = nil,
     StatusLabel = nil,
     OriginCFrame = nil,
     IsTeleporting = false,
 }
+
+local leafQueryParams = OverlapParams.new()
+leafQueryParams.FilterType = Enum.RaycastFilterType.Include
+leafQueryParams.MaxParts = 200
 
 local function Notify(tt, tx)
     pcall(function()
@@ -618,63 +627,186 @@ local function getRoot()
     return char:FindFirstChild("HumanoidRootPart")
 end
 
-local function teleportTo(pos)
+local function findNearestUnlockedLeaf(pos, radius)
+    if not Refs.LeafSim or not Refs.LeafFolder then return nil end
+    leafQueryParams.FilterDescendantsInstances = { Refs.LeafFolder }
+    local parts = workspace:GetPartBoundsInRadius(pos, radius, leafQueryParams)
+    local canUseLeaf = Refs.LeafSim.canUseLeaf
+    local nearest, minDist = nil, math.huge
+    for _, part in ipairs(parts) do
+        if part.Parent == Refs.LeafFolder and part:IsA("BasePart") then
+            local d = (part.Position - pos).Magnitude
+            if d < minDist then
+                local ok, usable = pcall(canUseLeaf, part)
+                if ok and usable then
+                    minDist = d
+                    nearest = part
+                end
+            end
+        end
+    end
+    return nearest
+end
+
+local function isPositionSafe(pos)
+    return findNearestUnlockedLeaf(pos, 30) ~= nil
+end
+
+local function countUnlockedLeavesNear(pos, radius)
+    if not Refs.LeafSim or not Refs.LeafFolder then return 0 end
+    leafQueryParams.FilterDescendantsInstances = { Refs.LeafFolder }
+    local parts = workspace:GetPartBoundsInRadius(pos, radius, leafQueryParams)
+    local count = 0
+    local canUseLeaf = Refs.LeafSim.canUseLeaf
+    for _, part in ipairs(parts) do
+        if part.Parent == Refs.LeafFolder then
+            local ok, usable = pcall(canUseLeaf, part)
+            if ok and usable then
+                count = count + 1
+            end
+        end
+    end
+    return count
+end
+
+local function isDumpsterUnlocked(dumpster)
+    local LeafSim = Refs.LeafSim
+    if not LeafSim then return false end
+    if not LeafSim.ranked or not LeafSim.ranked.canUse then return false end
+    local ok, result = pcall(function() return LeafSim.ranked.canUse(LocalPlayer, dumpster) end)
+    if ok then return result end
+    return false
+end
+
+local function getDumpsterPos(dumpster)
+    local leaves = dumpster:FindFirstChild("Leaves")
+    if leaves and leaves:IsA("BasePart") then
+        return leaves.Position
+    end
+    local ok, bb = pcall(function() return dumpster:GetBoundingBox() end)
+    if ok then return bb.Position end
+    return nil
+end
+
+local function strictIsDumpsterUnlocked(dumpster)
+    if not isDumpsterUnlocked(dumpster) then return false end
+    local pos = getDumpsterPos(dumpster)
+    if not pos then return false end
+    return findNearestUnlockedLeaf(pos, 30) ~= nil
+end
+
+local function safeTeleport(targetPos)
     local hrp = getRoot()
     if not hrp then return false end
-    pcall(function()
-        hrp.CFrame = CFrame.new(pos + Vector3.new(0, 3, 0))
-    end)
+    local originalCFrame = hrp.CFrame
+    local targetCFrame = CFrame.new(targetPos + Vector3.new(0, 3, 0))
+    pcall(function() hrp.CFrame = targetCFrame end)
+    task.wait(0.15)
+    local hrp2 = getRoot()
+    if not hrp2 then return false end
+    local actualPos = hrp2.Position
+    local deviation = (actualPos - targetPos).Magnitude
+    if deviation > 6 then
+        pcall(function() hrp2.CFrame = originalCFrame end)
+        task.wait(0.05)
+        return false
+    end
     return true
 end
 
-local function getDumpsterPos()
+local function getDumpsterValue(dumpster)
+    local attrNames = {"Price", "Value", "Multiplier", "Tier", "Level", "SellPrice", "CashPerLeaf", "Rate", "Bonus", "SellMult", "SellMultiplier", "Payout", "PayRate", "CashMult"}
+    local best = 0
+    for _, name in ipairs(attrNames) do
+        local ok, val = pcall(function() return dumpster:GetAttribute(name) end)
+        if ok and type(val) == "number" and val > best then
+            best = val
+        end
+    end
+    local ok2, descendants = pcall(function() return dumpster:GetDescendants() end)
+    if ok2 and descendants then
+        for _, child in ipairs(descendants) do
+            if child:IsA("NumberValue") or child:IsA("IntValue") then
+                local lower = child.Name:lower()
+                if lower:find("price") or lower:find("value") or lower:find("mult") or lower:find("tier") or lower:find("level") or lower:find("rate") or lower:find("payout") then
+                    if child.Value > best then
+                        best = child.Value
+                    end
+                end
+            end
+        end
+    end
+    return best
+end
+
+local function getBestDumpsterPos()
     if not Refs.Dumpsters then return nil end
     local hrp = getRoot()
     if not hrp then return nil end
     local origin = hrp.Position
-    local nearest, minDist = nil, math.huge
+    local bestPos, bestValue, bestDist = nil, -1, math.huge
     for _, obj in ipairs(Refs.Dumpsters:GetChildren()) do
-        if obj:IsA("Model") then
-            local pos
-            local leaves = obj:FindFirstChild("Leaves")
-            if leaves and leaves:IsA("BasePart") then
-                pos = leaves.Position
-            else
-                local ok, bb = pcall(function() return obj:GetBoundingBox() end)
-                if ok then pos = bb.Position end
-            end
-            if pos then
-                local d = (pos - origin).Magnitude
-                if d < minDist then
-                    minDist = d
-                    nearest = pos
+        if obj:IsA("Model") and strictIsDumpsterUnlocked(obj) then
+            local pos = getDumpsterPos(obj)
+            if pos and countUnlockedLeavesNear(pos, 30) >= 3 then
+                local value = getDumpsterValue(obj)
+                local dist = (pos - origin).Magnitude
+                if value > bestValue or (value == bestValue and dist < bestDist) then
+                    bestValue = value
+                    bestDist = dist
+                    bestPos = pos
                 end
             end
         end
     end
-    return nearest
+    if not bestPos then
+        for _, obj in ipairs(Refs.Dumpsters:GetChildren()) do
+            if obj:IsA("Model") and strictIsDumpsterUnlocked(obj) then
+                local pos = getDumpsterPos(obj)
+                if pos and countUnlockedLeavesNear(pos, 40) >= 1 then
+                    local dist = (pos - origin).Magnitude
+                    if dist < bestDist then
+                        bestDist = dist
+                        bestPos = pos
+                    end
+                end
+            end
+        end
+    end
+    return bestPos
 end
 
-local function getNearestLeafPos()
+local function canTpNow()
+    return tick() - (Refs.LastTpTime or 0) >= Refs.TpStayDuration
+end
+
+local function getSafeLeafPos()
+    if not canTpNow() then return nil end
     if not Refs.LeafFolder or not Refs.LeafSim then return nil end
     local hrp = getRoot()
     if not hrp then return nil end
     local origin = hrp.Position
-    local nearest, minDist = nil, math.huge
     local canUseLeaf = Refs.LeafSim.canUseLeaf
+    local candidates = {}
     for _, leaf in ipairs(Refs.LeafFolder:GetChildren()) do
         if leaf:IsA("BasePart") then
-            local ok, usable = pcall(canUseLeaf, leaf)
-            if ok and usable then
-                local d = (leaf.Position - origin).Magnitude
-                if d < minDist then
-                    minDist = d
-                    nearest = leaf.Position
+            local pos = leaf.Position
+            local d = (pos - origin).Magnitude
+            if d <= Refs.MaxTpDistance and d >= 5 then
+                local ok, usable = pcall(canUseLeaf, leaf)
+                if ok and usable then
+                    table.insert(candidates, {pos = pos, dist = d})
                 end
             end
         end
     end
-    return nearest
+    table.sort(candidates, function(a, b) return a.dist < b.dist end)
+    for _, c in ipairs(candidates) do
+        if countUnlockedLeavesNear(c.pos, 6) >= 2 then
+            return c.pos
+        end
+    end
+    return nil
 end
 
 local function GetCurrentInterval()
@@ -779,6 +911,12 @@ Section:Toggle({
     callback = function(state) Refs.AutoFarm = state end
 })
 
+Section:Toggle({
+    text = "防出界 (未解锁区域自动回传)",
+    state = false,
+    callback = function(state) Refs.AntiOutOfBounds = state end
+})
+
 Section:Slider({
     text = "拾取范围",
     min = 10, max = 200, default = 20,
@@ -795,6 +933,18 @@ Section:Slider({
     text = "拾取间隔(秒)",
     min = 0.02, max = 0.5, default = 0.5,
     callback = function(val) Refs.CollectInterval = val end
+})
+
+Section:Slider({
+    text = "寻叶TP最大距离",
+    min = 30, max = 500, default = 200,
+    callback = function(val) Refs.MaxTpDistance = val end
+})
+
+Section:Slider({
+    text = "寻叶TP停留(秒)",
+    min = 0.5, max = 30, default = 4,
+    callback = function(val) Refs.TpStayDuration = val end
 })
 
 Section:Button({
@@ -942,20 +1092,22 @@ task.spawn(function()
 
         if Refs.PausedByBag and Refs.AutoSell and not Refs.IsTeleporting then
             Refs.IsTeleporting = true
-            local dumpPos = getDumpsterPos()
+            local dumpPos = getBestDumpsterPos()
             local hrp = getRoot()
             if dumpPos and hrp then
                 local savedCFrame = hrp.CFrame
-                teleportTo(dumpPos)
-                task.wait(Refs.SellDelay)
-                pcall(function() Refs.EmptyBackpack:FireServer() end)
-                task.wait(Refs.SellDelay)
-                pcall(function()
-                    local hrp2 = getRoot()
-                    if hrp2 then hrp2.CFrame = savedCFrame end
-                end)
+                local ok = safeTeleport(dumpPos)
+                if ok then
+                    task.wait(Refs.SellDelay)
+                    pcall(function() Refs.EmptyBackpack:FireServer() end)
+                    task.wait(Refs.SellDelay)
+                    pcall(function()
+                        local hrp2 = getRoot()
+                        if hrp2 then hrp2.CFrame = savedCFrame end
+                    end)
+                end
             end
-            task.wait(Refs.TpCooldown)
+            task.wait(Refs.SellTpCooldown)
             Refs.IsTeleporting = false
             continue
         end
@@ -967,6 +1119,9 @@ task.spawn(function()
 
         if not Refs.IsTeleporting then
             Refs.OriginCFrame = hrp.CFrame
+            if isPositionSafe(hrp.Position) then
+                Refs.LastSafeCFrame = hrp.CFrame
+            end
         end
 
         if not overlapFilterSet and Refs.LeafFolder then
@@ -997,17 +1152,54 @@ task.spawn(function()
         if #batch > 0 then
             pcall(function() Refs.CollectMany(batch) end)
         elseif Refs.AutoFarm then
-            local leafPos = getNearestLeafPos()
+            local leafPos = getSafeLeafPos()
             if leafPos then
                 Refs.IsTeleporting = true
-                teleportTo(leafPos)
-                task.wait(Refs.TpCooldown)
+                local ok = safeTeleport(leafPos)
+                if ok then
+                    Refs.LastTpTime = tick()
+                end
+                task.wait(0.15)
                 Refs.IsTeleporting = false
             end
         end
     end
 end)
 
+task.spawn(function()
+    while true do
+        task.wait(0.5)
+        if not Refs.AntiOutOfBounds then continue end
+        if not Refs.UserIntent then continue end
+        if Refs.IsTeleporting then continue end
+        if Refs.PausedByBag then continue end
+
+        local hrp = getRoot()
+        if not hrp then continue end
+
+        if isPositionSafe(hrp.Position) then
+            Refs.LastSafeCFrame = hrp.CFrame
+        else
+            Refs.IsTeleporting = true
+            local dumpPos = getBestDumpsterPos()
+            if dumpPos then
+                local ok = safeTeleport(dumpPos)
+                if ok then
+                    Refs.LastTpTime = tick()
+                end
+            elseif Refs.LastSafeCFrame then
+                local ok = safeTeleport(Refs.LastSafeCFrame.Position)
+                if ok then
+                    Refs.LastTpTime = tick()
+                end
+            end
+            task.wait(0.15)
+            Refs.IsTeleporting = false
+        end
+    end
+end)
+
 OnLeavesChanged()
 RefreshStatus()
- ------使用默认配置即可,加速间隔可改成0.05,按需修改,tp树叶有bug懒得修可用可不用
+
+------更新了未解锁区域判断,更新了防出界,更新了垃圾桶判断（优先可用最高价）,更新了叶子tp（会拖延速度可有可无）
