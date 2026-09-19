@@ -13,7 +13,7 @@ if not uiParent then pcall(function() uiParent = game:GetService("CoreGui") end)
 if not uiParent then uiParent = LocalPlayer:WaitForChild("PlayerGui") end
 
 for _, v in next, uiParent:GetChildren() do
-    if v:IsA("ScreenGui") and (v.Name == "Neverlose" or v.Name == "NeverloseFloating" or v.Name == "NLSplash") then
+    if v:IsA("ScreenGui") and (v.Name == "Neverlose" or v.Name == "NeverloseFloating" or v.Name == "NLSplash" or v.Name:sub(1,9) == "NL_Bind_") then
         v:Destroy()
     end
 end
@@ -33,6 +33,7 @@ local Theme = {
     TextDim = Color3.fromRGB(148, 160, 184),
     TextMuted = Color3.fromRGB(76, 86, 108),
     Success = Color3.fromRGB(90, 240, 150),
+    Danger = Color3.fromRGB(255, 90, 100),
     ToggleOff = Color3.fromRGB(42, 48, 64),
 }
 
@@ -93,27 +94,26 @@ end
 
 local function Dragify(handle, target)
     target = target or handle
-    local dragging, startPos, startParent = false, nil, nil
-    handle.InputBegan:Connect(function(i)
-        if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
-            dragging = true
-            startPos = i.Position
-            startParent = target.Position
-        end
-    end)
-    UserInputService.InputChanged:Connect(function(i)
-        if dragging and (i.UserInputType == Enum.UserInputType.MouseMovement or i.UserInputType == Enum.UserInputType.Touch) then
-            local delta = i.Position - startPos
-            target.Position = UDim2.new(
-                startParent.X.Scale, startParent.X.Offset + delta.X,
-                startParent.Y.Scale, startParent.Y.Offset + delta.Y
-            )
-        end
-    end)
-    UserInputService.InputEnded:Connect(function(i)
-        if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
-            dragging = false
-        end
+    handle.InputBegan:Connect(function(input)
+        if input.UserInputType ~= Enum.UserInputType.MouseButton1
+        and input.UserInputType ~= Enum.UserInputType.Touch then return end
+
+        local startPos = input.Position
+        local startFramePos = target.Position
+        local conn
+
+        conn = input.Changed:Connect(function()
+            if input.UserInputState == Enum.UserInputState.Change then
+                local delta = input.Position - startPos
+                target.Position = UDim2.new(
+                    startFramePos.X.Scale, startFramePos.X.Offset + delta.X,
+                    startFramePos.Y.Scale, startFramePos.Y.Offset + delta.Y
+                )
+            elseif input.UserInputState == Enum.UserInputState.End
+                or input.UserInputState == Enum.UserInputState.Cancel then
+                if conn then conn:Disconnect() end
+            end
+        end)
     end)
 end
 
@@ -390,7 +390,7 @@ end
 function Library:Window(options)
     options = options or {}
     options.text = options.text or "NEVERLOSE"
-    options.subtext = options.subtext or "v10.0  •  premium"
+    options.subtext = options.subtext or "v13.0  •  premium"
 
     local W, H = 900, 620
     local SBW = 220
@@ -399,6 +399,7 @@ function Library:Window(options)
     local CONTENT_PAD_X = 16
     local COL_GAP = 14
     local SCROLLBAR_W = 6
+    local IS_TOUCH = UserInputService.TouchEnabled and not UserInputService.KeyboardEnabled
 
     local SG = Instance.new("ScreenGui")
     SG.Name = "Neverlose"
@@ -569,7 +570,7 @@ function Library:Window(options)
     qqWrap.Parent = TopBar
     corner(qqWrap, 14)
     gradient(qqWrap, Theme.Card1, Theme.Card2, 90)
-    local qqStroke = stroke(qqWrap, Theme.Accent, 1.2, 0.35)
+    stroke(qqWrap, Theme.Accent, 1.2, 0.35)
 
     local qqDot = Instance.new("Frame")
     qqDot.BackgroundColor3 = Theme.Accent
@@ -1043,6 +1044,7 @@ function Library:Window(options)
                 function elements:Slider(eopts)
                     if not eopts.text or not eopts.min or not eopts.max or not eopts.callback then return end
                     local Held = false
+                    local activeInput = nil
 
                     local wrap = Instance.new("Frame")
                     wrap.BackgroundTransparency = 1
@@ -1119,28 +1121,30 @@ function Library:Window(options)
                         setValue(minV + pos * (maxV - minV))
                     end
 
-                    track.InputBegan:Connect(function(i)
-                        if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
-                            Held = true
-                            updateFromX(i.Position.X)
-                        end
-                    end)
-                    knob.InputBegan:Connect(function(i)
-                        if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
-                            Held = true
-                        end
-                    end)
+                    local function bindInput(input)
+                        if input.UserInputType ~= Enum.UserInputType.MouseButton1
+                        and input.UserInputType ~= Enum.UserInputType.Touch then return end
+                        Held = true
+                        activeInput = input
+                        updateFromX(input.Position.X)
 
-                    UserInputService.InputChanged:Connect(function(i)
-                        if Held and (i.UserInputType == Enum.UserInputType.MouseMovement or i.UserInputType == Enum.UserInputType.Touch) then
-                            updateFromX(i.Position.X)
-                        end
-                    end)
-                    UserInputService.InputEnded:Connect(function(i)
-                        if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
-                            Held = false
-                        end
-                    end)
+                        local conn
+                        conn = input.Changed:Connect(function()
+                            if input.UserInputState == Enum.UserInputState.Change then
+                                if Held and activeInput == input then
+                                    updateFromX(input.Position.X)
+                                end
+                            elseif input.UserInputState == Enum.UserInputState.End
+                                or input.UserInputState == Enum.UserInputState.Cancel then
+                                Held = false
+                                activeInput = nil
+                                if conn then conn:Disconnect() end
+                            end
+                        end)
+                    end
+
+                    track.InputBegan:Connect(bindInput)
+                    knob.InputBegan:Connect(bindInput)
 
                     valBox.FocusLost:Connect(function(enter)
                         if enter then setValue(valBox.Text) end
@@ -1177,6 +1181,287 @@ function Library:Window(options)
                         sizeUD = UDim2.new(1, -22, 0, 22),
                     })
                     return label
+                end
+
+                function elements:Bind(eopts)
+                    eopts = eopts or {}
+                    if not eopts.text then return end
+
+                    local currentKey = eopts.default or Enum.KeyCode.RightControl
+                    local listening = false
+                    local floatBtn = nil
+                    local floatGui = nil
+                    local floatEnabled = false
+
+                    local row = Instance.new("Frame")
+                    row.BackgroundTransparency = 1
+                    row.Size = UDim2.new(1, 0, 0, 40)
+                    row.Parent = contentFrame
+
+                    local lbl = makeText(row, {
+                        text = eopts.text,
+                        font = Enum.Font.GothamSemibold, size = 12, color = Theme.TextDim,
+                        anchor = Vector2.new(0, 0.5),
+                        position = UDim2.new(0, 0, 0.5, 0),
+                        sizeUD = UDim2.new(1, -110, 0, 24),
+                    })
+
+                    local stateDot = Instance.new("Frame")
+                    stateDot.BackgroundColor3 = Theme.TextMuted
+                    stateDot.BorderSizePixel = 0
+                    stateDot.AnchorPoint = Vector2.new(1, 0.5)
+                    stateDot.Position = UDim2.new(1, 0, 0.5, 0)
+                    stateDot.Size = UDim2.new(0, 8, 0, 8)
+                    stateDot.Parent = row
+                    corner(stateDot, UDim.new(1, 0))
+
+                    if IS_TOUCH then
+                        lbl.Size = UDim2.new(1, -70, 0, 24)
+                        stateDot.Position = UDim2.new(1, -60, 0.5, 0)
+
+                        local toggleTrack = Instance.new("TextButton")
+                        toggleTrack.BackgroundColor3 = Theme.ToggleOff
+                        toggleTrack.BorderSizePixel = 0
+                        toggleTrack.AnchorPoint = Vector2.new(1, 0.5)
+                        toggleTrack.Position = UDim2.new(1, 0, 0.5, 0)
+                        toggleTrack.Size = UDim2.new(0, 42, 0, 22)
+                        toggleTrack.AutoButtonColor = false
+                        toggleTrack.Text = ""
+                        toggleTrack.Parent = row
+                        corner(toggleTrack, UDim.new(1, 0))
+                        local toggleStroke = stroke(toggleTrack, Theme.Stroke, 1.2, 0.3)
+
+                        local toggleKnob = Instance.new("Frame")
+                        toggleKnob.BackgroundColor3 = Color3.new(1, 1, 1)
+                        toggleKnob.BorderSizePixel = 0
+                        toggleKnob.AnchorPoint = Vector2.new(0.5, 0.5)
+                        toggleKnob.Position = UDim2.new(0.3, 0, 0.5, 0)
+                        toggleKnob.Size = UDim2.new(0, 16, 0, 16)
+                        toggleKnob.Parent = toggleTrack
+                        corner(toggleKnob, UDim.new(1, 0))
+
+                        local function createFloat()
+                            if floatBtn and floatBtn.Parent then return end
+                            floatGui = Instance.new("ScreenGui")
+                            floatGui.Name = "NL_Bind_" .. tostring(math.random(1000, 9999))
+                            floatGui.ResetOnSpawn = false
+                            floatGui.DisplayOrder = 1001
+                            floatGui.IgnoreGuiInset = true
+                            floatGui.Parent = uiParent
+
+                            floatBtn = Instance.new("TextButton")
+                            floatBtn.Size = UDim2.new(0, 60, 0, 60)
+                            floatBtn.Position = UDim2.new(1, -90, 0.5, 40)
+                            floatBtn.BackgroundColor3 = Color3.new(1, 1, 1)
+                            floatBtn.Text = ""
+                            floatBtn.AutoButtonColor = false
+                            floatBtn.BorderSizePixel = 0
+                            floatBtn.Parent = floatGui
+                            corner(floatBtn, UDim.new(1, 0))
+                            gradient(floatBtn, Theme.Danger, Color3.fromRGB(180, 60, 70), 45)
+                            local fStroke = stroke(floatBtn, Color3.new(1, 1, 1), 1.5, 0.5)
+
+                            local fIcon = makeText(floatBtn, {
+                                text = "⚔",
+                                font = Enum.Font.GothamBold, size = 22, color = Color3.new(1, 1, 1),
+                                anchor = Vector2.new(0.5, 0.5),
+                                position = UDim2.new(0.5, 0, 0.4, 0),
+                                sizeUD = UDim2.new(1, 0, 0, 26),
+                                xAlign = Enum.TextXAlignment.Center,
+                            })
+
+                            local fState = makeText(floatBtn, {
+                                text = "OFF",
+                                font = Enum.Font.GothamBold, size = 9, color = Color3.new(1, 1, 1),
+                                anchor = Vector2.new(0.5, 0.5),
+                                position = UDim2.new(0.5, 0, 0.75, 0),
+                                sizeUD = UDim2.new(1, 0, 0, 12),
+                                xAlign = Enum.TextXAlignment.Center,
+                            })
+
+                            local dragMoved = false
+                            floatBtn.InputBegan:Connect(function(i)
+                                if i.UserInputType ~= Enum.UserInputType.MouseButton1
+                                and i.UserInputType ~= Enum.UserInputType.Touch then return end
+
+                                dragMoved = false
+                                local startPos = i.Position
+                                local startFramePos = floatBtn.Position
+                                local conn
+
+                                conn = i.Changed:Connect(function()
+                                    if i.UserInputState == Enum.UserInputState.Change then
+                                        local d = i.Position - startPos
+                                        if d.Magnitude > 6 then dragMoved = true end
+                                        floatBtn.Position = UDim2.new(
+                                            startFramePos.X.Scale, startFramePos.X.Offset + d.X,
+                                            startFramePos.Y.Scale, startFramePos.Y.Offset + d.Y
+                                        )
+                                    elseif i.UserInputState == Enum.UserInputState.End
+                                        or i.UserInputState == Enum.UserInputState.Cancel then
+                                        if conn then conn:Disconnect() end
+                                    end
+                                end)
+                            end)
+
+                            floatBtn.MouseButton1Click:Connect(function()
+                                if dragMoved then return end
+                                if eopts.callback then pcall(eopts.callback) end
+                            end)
+
+                            task.spawn(function()
+                                while floatBtn and floatBtn.Parent do
+                                    local on = false
+                                    if eopts.getState then
+                                        local ok, v = pcall(eopts.getState)
+                                        if ok then on = v end
+                                    end
+                                    if on then
+                                        floatBtn.BackgroundColor3 = Color3.fromRGB(50, 200, 120)
+                                        fStroke.Color = Color3.fromRGB(90, 240, 150)
+                                        fState.Text = "ON"
+                                        stateDot.BackgroundColor3 = Theme.Success
+                                    else
+                                        floatBtn.BackgroundColor3 = Color3.fromRGB(180, 60, 70)
+                                        fStroke.Color = Theme.Danger
+                                        fState.Text = "OFF"
+                                        stateDot.BackgroundColor3 = Theme.TextMuted
+                                    end
+                                    task.wait(0.25)
+                                end
+                            end)
+                        end
+
+                        local function destroyFloat()
+                            if floatGui then floatGui:Destroy() end
+                            floatGui = nil
+                            floatBtn = nil
+                            stateDot.BackgroundColor3 = Theme.TextMuted
+                        end
+
+                        toggleTrack.MouseButton1Click:Connect(function()
+                            floatEnabled = not floatEnabled
+                            if floatEnabled then
+                                createFloat()
+                                TweenService:Create(toggleTrack, TweenInfo.new(0.2), {BackgroundColor3 = Theme.Accent}):Play()
+                                toggleStroke.Color = Theme.Accent
+                                toggleStroke.Transparency = 0
+                                toggleKnob.Position = UDim2.new(0.7, 0, 0.5, 0)
+                                lbl.TextColor3 = Theme.Text
+                            else
+                                destroyFloat()
+                                TweenService:Create(toggleTrack, TweenInfo.new(0.2), {BackgroundColor3 = Theme.ToggleOff}):Play()
+                                toggleStroke.Color = Theme.Stroke
+                                toggleStroke.Transparency = 0.3
+                                toggleKnob.Position = UDim2.new(0.3, 0, 0.5, 0)
+                                lbl.TextColor3 = Theme.TextDim
+                            end
+                        end)
+                    else
+                        local keyBtn = Instance.new("TextButton")
+                        keyBtn.BackgroundColor3 = Theme.Bg2
+                        keyBtn.BorderSizePixel = 0
+                        keyBtn.AnchorPoint = Vector2.new(1, 0.5)
+                        keyBtn.Position = UDim2.new(1, 0, 0.5, 0)
+                        keyBtn.Size = UDim2.new(0, 96, 0, 26)
+                        keyBtn.AutoButtonColor = false
+                        keyBtn.Font = Enum.Font.GothamBold
+                        keyBtn.TextSize = 11
+                        keyBtn.TextColor3 = Theme.Accent
+                        keyBtn.Text = currentKey.Name
+                        keyBtn.Parent = row
+                        corner(keyBtn, 5)
+                        local keyStroke = stroke(keyBtn, Theme.Stroke, 1, 0.3)
+
+                        stateDot.Visible = false
+
+                        local function refreshKeyLabel()
+                            if listening then
+                                keyBtn.Text = "..."
+                                keyBtn.TextColor3 = Theme.Success
+                                keyStroke.Color = Theme.Success
+                                keyStroke.Transparency = 0.2
+                            else
+                                keyBtn.Text = currentKey.Name
+                                keyBtn.TextColor3 = Theme.Accent
+                                keyStroke.Color = Theme.Stroke
+                                keyStroke.Transparency = 0.3
+                            end
+                        end
+
+                        keyBtn.MouseEnter:Connect(function()
+                            if not listening then
+                                TweenService:Create(keyBtn, TweenInfo.new(0.15), {BackgroundColor3 = Theme.Card1}):Play()
+                            end
+                        end)
+                        keyBtn.MouseLeave:Connect(function()
+                            if not listening then
+                                TweenService:Create(keyBtn, TweenInfo.new(0.15), {BackgroundColor3 = Theme.Bg2}):Play()
+                            end
+                        end)
+
+                        keyBtn.MouseButton1Click:Connect(function()
+                            listening = true
+                            refreshKeyLabel()
+                        end)
+
+                        UserInputService.InputBegan:Connect(function(input, gp)
+                            if gp then return end
+                            if listening then
+                                if input.UserInputType == Enum.UserInputType.Keyboard then
+                                    if input.KeyCode ~= Enum.KeyCode.Unknown then
+                                        currentKey = input.KeyCode
+                                        listening = false
+                                        refreshKeyLabel()
+                                        if eopts.onChanged then pcall(eopts.onChanged, currentKey) end
+                                    end
+                                elseif input.UserInputType == Enum.UserInputType.MouseButton1
+                                    or input.UserInputType == Enum.UserInputType.Touch then
+                                    local absPos = keyBtn.AbsolutePosition
+                                    local absSize = keyBtn.AbsoluteSize
+                                    local mx = input.Position.X
+                                    local my = input.Position.Y
+                                    local inside = mx >= absPos.X and mx <= absPos.X + absSize.X
+                                        and my >= absPos.Y and my <= absPos.Y + absSize.Y
+                                    if not inside then
+                                        listening = false
+                                        refreshKeyLabel()
+                                    end
+                                end
+                            else
+                                if input.UserInputType == Enum.UserInputType.Keyboard
+                                    and input.KeyCode == currentKey then
+                                    if eopts.callback then pcall(eopts.callback) end
+                                end
+                            end
+                        end)
+
+                        task.spawn(function()
+                            while stateDot.Parent do
+                                if eopts.getState then
+                                    local ok, v = pcall(eopts.getState)
+                                    if ok then
+                                        stateDot.BackgroundColor3 = v and Theme.Success or Theme.TextMuted
+                                    end
+                                end
+                                task.wait(0.25)
+                            end
+                        end)
+
+                        return {
+                            GetKey = function() return currentKey end,
+                            SetKey = function(k)
+                                currentKey = k
+                                refreshKeyLabel()
+                            end,
+                        }
+                    end
+
+                    return {
+                        SetFloatEnabled = function(v)
+                            floatEnabled = v
+                        end,
+                    }
                 end
 
                 function elements:Dropdown(eopts)
@@ -1320,26 +1605,29 @@ function Library:Window(options)
 
     local dragMoved = false
     FloatBtn.InputBegan:Connect(function(i)
-        if i.UserInputType == Enum.UserInputType.MouseButton1 or i.UserInputType == Enum.UserInputType.Touch then
-            dragMoved = false
-            local startPos = i.Position
-            local startPos2 = FloatBtn.Position
-            local conn
-            conn = UserInputService.InputChanged:Connect(function(m)
-                if m.UserInputType == Enum.UserInputType.MouseMovement or m.UserInputType == Enum.UserInputType.Touch then
-                    local d = m.Position - startPos
-                    if d.Magnitude > 5 then dragMoved = true end
-                    FloatBtn.Position = UDim2.new(
-                        startPos2.X.Scale, startPos2.X.Offset + d.X,
-                        startPos2.Y.Scale, startPos2.Y.Offset + d.Y
-                    )
-                end
-            end)
-            i.Changed:Connect(function()
-                if i.UserInputState == Enum.UserInputState.End then conn:Disconnect() end
-            end)
-        end
+        if i.UserInputType ~= Enum.UserInputType.MouseButton1
+        and i.UserInputType ~= Enum.UserInputType.Touch then return end
+
+        dragMoved = false
+        local startPos = i.Position
+        local startFramePos = FloatBtn.Position
+        local conn
+
+        conn = i.Changed:Connect(function()
+            if i.UserInputState == Enum.UserInputState.Change then
+                local d = i.Position - startPos
+                if d.Magnitude > 5 then dragMoved = true end
+                FloatBtn.Position = UDim2.new(
+                    startFramePos.X.Scale, startFramePos.X.Offset + d.X,
+                    startFramePos.Y.Scale, startFramePos.Y.Offset + d.Y
+                )
+            elseif i.UserInputState == Enum.UserInputState.End
+                or i.UserInputState == Enum.UserInputState.Cancel then
+                if conn then conn:Disconnect() end
+            end
+        end)
     end)
+
     FloatBtn.MouseButton1Click:Connect(function()
         if not dragMoved then Body.Visible = not Body.Visible end
     end)
@@ -1377,7 +1665,7 @@ function Library:Window(options)
     })
 
     local sbVersion = makeText(statusBar, {
-        text = "Q群 1126230422  •  v10.0",
+        text = "Q群 1126230422  •  v13.0",
         size = 10, color = Theme.TextMuted,
         anchor = Vector2.new(1, 0.5),
         position = UDim2.new(1, -16, 0.5, 0),
@@ -1398,12 +1686,13 @@ function Library:Window(options)
     WindowObj.Body = Body
     WindowObj.ScreenGui = SG
     WindowObj.ShowBody = showBody
+    WindowObj.IsTouch = IS_TOUCH
     return WindowObj
 end
 
 local MainWindow = Library:Window({
     text = "NEVERLOSE",
-    subtext = "v10.0  •  premium"
+    subtext = "v13.0  •  premium"
 })
 
 do
@@ -2156,11 +2445,26 @@ do
     })
 
     local SecToggle = Tab:Section({text = "总开关"})
-    SecToggle:Toggle({text = "自动攻击总开关", state = false, callback = function(v) CONFIG.Enabled = v end})
+    local mainToggle = SecToggle:Toggle({
+        text = "自动攻击总开关",
+        state = false,
+        callback = function(v) CONFIG.Enabled = v end
+    })
     SecToggle:Toggle({text = "攻击 NPC / 怪物", state = false, callback = function(v) CONFIG.AttackNPC = v end})
     SecToggle:Toggle({text = "攻击保险箱", state = false, callback = function(v) CONFIG.AttackSafe = v end})
     SecToggle:Toggle({text = "目标高亮描边", state = false, callback = function(v) CONFIG.HighlightTarget = v end})
     SecToggle:Toggle({text = "自动转向目标", state = false, callback = function(v) CONFIG.AutoRotate = v end})
+    SecToggle:Bind({
+        text = "杀戮快捷键",
+        default = Enum.KeyCode.RightControl,
+        getState = function() return CONFIG.Enabled end,
+        callback = function()
+            CONFIG.Enabled = not CONFIG.Enabled
+            if mainToggle and mainToggle.Set then
+                mainToggle.Set(CONFIG.Enabled)
+            end
+        end,
+    })
 
     local SecNPC = Tab:Section({text = "怪物攻击"})
     SecNPC:Slider({text = "攻击范围", min = 5, max = 1000, default = 200, callback = function(v) CONFIG.Range = v end})
